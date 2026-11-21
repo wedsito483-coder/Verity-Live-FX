@@ -1,69 +1,51 @@
-
 name: Crear ZIP con la APK
-
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - 'VerityLiveFX-Android-Project.zip'
-      - '.github/workflows/**'
-
+    tags-ignore: ['**']
+  workflow_dispatch:
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Descargar repositorio
-        uses: actions/checkout@v4
-
-      - name: Comprobar proyecto
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Usar el zip más reciente
         run: |
-          ZIP="VerityLiveFX-Android-Project.zip"
-
-          if [ ! -f "$ZIP" ]; then
-            echo "No se encontró el proyecto Android: $ZIP"
-            exit 1
-          fi
-
-          unzip -q "$ZIP" -d .
-          test -f VerityLiveFX/settings.gradle
-          test -f VerityLiveFX/app/build.gradle
-          test -f VerityLiveFX/app/src/main/assets/index.html
-
-          echo "Proyecto Android encontrado correctamente."
-
-      - name: Configurar Java
-        uses: actions/setup-java@v4
+          best=""
+          bt=0
+          for z in *.zip; do
+            t=$(git log -1 --format=%ct -- "$z")
+            if [ "$t" -gt "$bt" ]; then
+              bt=$t
+              best="$z"
+            fi
+          done
+          echo "Usando: $best"
+          echo "ZIP_USADO=$best" >> "$GITHUB_ENV"
+          unzip -q "$best"
+          ls VerityLiveFX
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-
-      - name: Configurar Gradle
-        uses: gradle/actions/setup-gradle@v4
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
-
-      - name: Compilar APK
+          gradle-version: 8.9
+      - run: gradle assembleDebug
         working-directory: VerityLiveFX
-        run: gradle assembleDebug
-
-      - name: Comprobar APK
+      - name: Meter la APK en un ZIP
         run: |
-          APK="VerityLiveFX/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          mkdir -p salida
-          cp "$APK" salida/VerityLiveFX.apk
+          mkdir salida
+          cp VerityLiveFX/app/build/outputs/apk/debug/app-debug.apk salida/VerityLiveFX.apk
           cd salida
           zip ../VerityLiveFX-APK.zip VerityLiveFX.apk
-
-      - name: Publicar APK en ZIP
+      - name: Publicar el ZIP para descargarlo
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "apk-${{ github.run_number }}" \
-            VerityLiveFX-APK.zip \
-            --title "VerityLiveFX APK #${{ github.run_number }}" \
-            --notes "APK compilada automáticamente."
+          gh release create "apk-${{ github.run_number }}" VerityLiveFX-APK.zip \
+            --title "APK #${{ github.run_number }} (${ZIP_USADO})" \
+            --notes "ZIP con la APK, generado desde ${ZIP_USADO}"
